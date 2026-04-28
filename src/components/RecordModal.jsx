@@ -1,96 +1,121 @@
-import React, { useState, useEffect } from 'react';
-import { db } from '../firebase-config';
+import React, { useState } from 'react';
+import { db, storage } from '../firebase-config';
 import { collection, addDoc } from 'firebase/firestore';
-import { fetchSuggestions } from '../services/GeocodingService';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
-const RecordModal = ({ user, onClose }) => {
-  const [city, setCity] = useState('');
-  const [suggestions, setSuggestions] = useState([]);
-  const [selectedLocation, setSelectedLocation] = useState(null);
+const RecordModal = ({ user, onClose, selectedCoords }) => {
+  const [location, setLocation] = useState('');
+  const [date, setDate] = useState(''); // 날짜 상태 (연월일)
   const [memo, setMemo] = useState('');
-  
-  // 연/월 상태 (기본값 현재 날짜)
-  const [year, setYear] = useState(new Date().getFullYear());
-  const [month, setMonth] = useState(new Date().getMonth() + 1);
-
-  useEffect(() => {
-    const timer = setTimeout(async () => {
-      if (city.length >= 2 && !selectedLocation) {
-        const results = await fetchSuggestions(city);
-        setSuggestions(results);
-      } else {
-        setSuggestions([]);
-      }
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [city, selectedLocation]);
+  const [imageFile, setImageFile] = useState(null);
+  const [loading, setLoading] = useState(false);
 
   const handleSave = async () => {
-    if (!selectedLocation) return alert("도시를 선택해주세요!");
-    
+    // 필수값 체크 (ISTJ 스타일의 꼼꼼한 검증)
+    if (!location || !date || !imageFile) {
+      return alert("장소, 날짜, 사진은 필수 입력 항목입니다.");
+    }
+    if (!selectedCoords) {
+      return alert("지도에서 위치를 먼저 클릭해주세요.");
+    }
+
+    setLoading(true);
+
     try {
-      const dateValue = parseInt(`${year}${String(month).padStart(2, '0')}`);
-      
+      // 1. Firebase Storage에 이미지 업로드
+      const storageRef = ref(storage, `travels/${user.uid}/${Date.now()}_${imageFile.name}`);
+      const uploadResult = await uploadBytes(storageRef, imageFile);
+      const imageUrl = await getDownloadURL(uploadResult.ref);
+
+      // 2. Firestore에 모든 데이터 저장
       await addDoc(collection(db, "travels"), {
         userId: user.uid,
-        cityName: selectedLocation.cityName,
+        location: location,
+        date: date,      // 기록한 날짜 (예: 2006-05)
         memo: memo,
-        travelDateValue: dateValue, // 정렬용 (202405)
-        travelDateDisplay: `${year}년 ${month}월`, // 표시용
-        createdAt: new Date(),
-        coordinates: selectedLocation.center,
+        imageUrl: imageUrl,
+        coords: selectedCoords, // 지도에서 클릭한 좌표 [lng, lat]
+        createdAt: new Date()
       });
+
+      alert("소중한 추억이 저장되었습니다.");
       onClose();
-    } catch (e) { alert("저장 실패"); }
+    } catch (e) {
+      console.error("저장 중 에러 발생:", e);
+      alert("저장에 실패했습니다. 다시 시도해주세요.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
     <div style={modalOverlayStyle}>
       <div style={modalContentStyle}>
-        <h3 style={{ margin: '0 0 15px 0' }}>📍 여행 기록</h3>
+        <h3 style={{ marginTop: 0 }}>📷 추억 기록하기</h3>
         
-        {/* 날짜 선택 (연/월) */}
-        <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
-  <select value={year} onChange={(e) => setYear(e.target.value)} style={selectStyle}>
-    {/* 2026년부터 2006년까지 역순으로 생성 */}
-    {Array.from({ length: 2026 - 2006 + 1 }, (_, i) => 2026 - i).map(y => (
-      <option key={y} value={y}>{y}년</option>
-    ))}
-  </select>
-  
-  <select value={month} onChange={(e) => setMonth(e.target.value)} style={selectStyle}>
-    {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
-      <option key={m} value={m}>{m}월</option>
-    ))}
-  </select>
-</div>
-
+        <label style={labelStyle}>방문 장소</label>
         <input 
-          placeholder="도시 검색" 
-          style={inputStyle} 
-          value={city} 
-          onChange={(e) => { setCity(e.target.value); setSelectedLocation(null); }} 
+          type="text" 
+          placeholder="예: 건국대학교" 
+          style={inputStyle}
+          value={location}
+          onChange={(e) => setLocation(e.target.value)} 
         />
-        {suggestions.length > 0 && (
-          <ul style={suggestionListStyle}>
-            {suggestions.map((s, i) => <li key={i} onClick={() => { setCity(s.fullAddress); setSelectedLocation(s); setSuggestions([]); }} style={suggestionItemStyle}>{s.fullAddress}</li>)}
-          </ul>
-        )}
-        
-        <textarea placeholder="메모" style={textareaStyle} value={memo} onChange={(e) => setMemo(e.target.value)} />
-        <button onClick={handleSave} style={saveButtonStyle}>저장</button>
+
+        <label style={labelStyle}>방문 날짜</label>
+        <input 
+          type="month" // '연-월'만 선택하도록 설정 (과거 기록에 최적화)
+          style={inputStyle}
+          value={date}
+          onChange={(e) => setDate(e.target.value)} 
+        />
+
+        <label style={labelStyle}>메모</label>
+        <textarea 
+          placeholder="그때의 기분은 어땠나요?" 
+          style={{ ...inputStyle, height: '80px', resize: 'none' }}
+          value={memo}
+          onChange={(e) => setMemo(e.target.value)}
+        />
+
+        <label style={labelStyle}>사진 업로드 (폴라로이드 핀)</label>
+        <input 
+          type="file" 
+          accept="image/*" 
+          style={{ marginBottom: '20px' }}
+          onChange={(e) => setImageFile(e.target.files[0])} 
+        />
+
+        <div style={buttonGroupStyle}>
+          <button 
+            onClick={handleSave} 
+            disabled={loading}
+            style={loading ? disabledButtonStyle : saveButtonStyle}
+          >
+            {loading ? "기록 중..." : "저장하기"}
+          </button>
+          <button onClick={onClose} style={cancelButtonStyle}>취소</button>
+        </div>
       </div>
     </div>
   );
 };
 
-const modalOverlayStyle = { position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 2000 };
-const modalContentStyle = { backgroundColor: 'white', padding: '25px', borderRadius: '15px', width: '320px', display: 'flex', flexDirection: 'column' };
-const selectStyle = { flex: 1, padding: '8px', borderRadius: '5px', border: '1px solid #ddd' };
-const inputStyle = { padding: '10px', borderRadius: '5px', border: '1px solid #ddd', marginBottom: '10px' };
-const suggestionListStyle = { position: 'absolute', top: '135px', left: '25px', right: '25px', backgroundColor: 'white', border: '1px solid #ddd', zIndex: 100, listStyle: 'none', padding: 0 };
-const suggestionItemStyle = { padding: '10px', cursor: 'pointer', borderBottom: '1px solid #eee', fontSize: '12px' };
-const textareaStyle = { padding: '10px', borderRadius: '5px', border: '1px solid #ddd', height: '80px', marginBottom: '10px' };
-const saveButtonStyle = { padding: '12px', backgroundColor: '#FF5A5F', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 'bold' };
+// --- 간단한 스타일 정의 ---
+const modalOverlayStyle = {
+  position: 'fixed', top: 0, left: 0, width: '100%', height: '100%',
+  backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 2000
+};
+
+const modalContentStyle = {
+  backgroundColor: 'white', padding: '24px', borderRadius: '16px', width: '90%', maxWidth: '400px', display: 'flex', flexDirection: 'column'
+};
+
+const labelStyle = { fontSize: '14px', fontWeight: 'bold', marginBottom: '6px', color: '#555' };
+const inputStyle = { padding: '10px', marginBottom: '16px', borderRadius: '8px', border: '1px solid #ddd' };
+const buttonGroupStyle = { display: 'flex', gap: '10px', marginTop: '10px' };
+const saveButtonStyle = { flex: 1, padding: '12px', backgroundColor: '#FF5A5F', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' };
+const disabledButtonStyle = { ...saveButtonStyle, backgroundColor: '#ccc', cursor: 'not-allowed' };
+const cancelButtonStyle = { flex: 1, padding: '12px', backgroundColor: '#eee', color: '#333', border: 'none', borderRadius: '8px', cursor: 'pointer' };
 
 export default RecordModal;
