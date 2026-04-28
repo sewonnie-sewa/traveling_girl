@@ -2,56 +2,84 @@ import React, { useEffect, useRef } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 
-// 본인의 Mapbox 토큰을 꼭 입력하세요!
 mapboxgl.accessToken = 'pk.eyJ1Ijoic2V3b25uaWUiLCJhIjoiY21vaHc0d2toMDBiMzJzbXR6N3VsY3BlbSJ9.qEAir2NIpf1EBfGg3O3wxw';
 
-const MapView = ({ records, focusCoords }) => {
+const MapView = ({ records }) => {
   const mapContainer = useRef(null);
   const map = useRef(null);
-  const markers = useRef([]); // 마커를 관리하기 위한 ref
+  const markers = useRef([]);
 
   useEffect(() => {
-    if (map.current) return; // 지도가 이미 있으면 생성 안 함
-    
+    if (map.current) return;
     map.current = new mapboxgl.Map({
       container: mapContainer.current,
-      style: 'mapbox://styles/mapbox/streets-v12',
-      projection: 'globe',
-      center: [127.1, 37.5],
-      zoom: 2 // 전세계를 보기 위해 줌을 낮춤
+      style: 'mapbox://styles/mapbox/light-v10',
+      center: [127.0, 37.5],
+      zoom: 2,
+      projection: 'globe'
     });
 
     map.current.on('style.load', () => {
-      map.current.setFog({ color: 'white', 'high-color': '#adb5bd' });
+      map.current.setFog({ color: 'rgb(186, 210, 235)', 'space-color': 'rgb(11, 11, 25)', 'star-intensity': 0.5 });
     });
   }, []);
 
-  // 핀(마커) 꽂기 로직
   useEffect(() => {
     if (!map.current || !records) return;
 
-    // 기존 마커 제거
-    markers.current.forEach(marker => marker.remove());
+    markers.current.forEach(m => m.remove());
     markers.current = [];
 
     records.forEach((record) => {
-      if (!record.coordinates) return;
+      if (!record.coords) return;
 
-      const marker = new mapboxgl.Marker({ color: '#FF5A5F' })
-        .setLngLat(record.coordinates)
-        .setPopup(new mapboxgl.Popup().setHTML(`<h4>${record.cityName}</h4><p>${record.memo}</p>`))
-        .addTo(map.current);
+      // 1. 위치를 고정할 투명한 부모 컨테이너 (이건 절대 transform 하면 안 됨)
+      const el = document.createElement('div');
+      el.style.width = '60px';
+      el.style.height = '75px';
+
+      // 2. 실제 스타일이 적용될 내부 박스 (이걸 확대할 것임)
+      const inner = document.createElement('div');
+      inner.style.width = '100%';
+      inner.style.height = '100%';
+      inner.style.backgroundColor = 'white';
+      inner.style.padding = '4px';
+      inner.style.paddingBottom = '15px';
+      inner.style.boxShadow = '0 4px 10px rgba(0,0,0,0.3)';
+      inner.style.borderRadius = '2px';
+      inner.style.cursor = 'pointer';
+      inner.style.boxSizing = 'border-box';
+      inner.style.transition = 'transform 0.2s ease-out'; // 애니메이션 효과
+
+      // 3. 사진 이미지
+      const img = document.createElement('img');
+      img.src = record.imageUrl;
+      img.style.width = '100%';
+      img.style.height = '100%';
+      img.style.objectFit = 'cover';
+      img.style.display = 'block';
+
+      inner.appendChild(img);
+      el.appendChild(inner);
       
+      // --- 호버 이벤트: 부모(el)가 아닌 자식(inner)만 확대 ---
+      el.onmouseenter = () => {
+        inner.style.transform = 'scale(1.8) rotate(-5deg)';
+        inner.style.zIndex = '1000';
+      };
+      el.onmouseleave = () => {
+        inner.style.transform = 'scale(1) rotate(0deg)';
+        inner.style.zIndex = '1';
+      };
+
+      const marker = new mapboxgl.Marker(el)
+        .setLngLat(record.coords)
+        .setPopup(new mapboxgl.Popup({ offset: 25 }).setHTML(`<b>${record.location}</b><br>${record.date}`))
+        .addTo(map.current);
+
       markers.current.push(marker);
     });
   }, [records]);
-
-  // 클릭 시 이동
-  useEffect(() => {
-    if (focusCoords && map.current) {
-      map.current.flyTo({ center: focusCoords, zoom: 10, essential: true });
-    }
-  }, [focusCoords]);
 
   return <div ref={mapContainer} style={{ width: '100%', height: '100%' }} />;
 };
