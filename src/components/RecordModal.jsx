@@ -110,6 +110,13 @@ const RecordModal = ({ user, onClose }) => {
           onChange={(e) => setDate(e.target.value)} 
         />
 
+        <textarea 
+          placeholder="메모를 입력하세요" 
+          style={inputStyle}
+          value={memo}
+          onChange={(e) => setMemo(e.target.value)} 
+        />
+
         <label style={labelStyle}>사진 선택 (폴라로이드용)</label>
         <input 
           type="file" 
